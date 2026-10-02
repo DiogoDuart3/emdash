@@ -2266,8 +2266,9 @@ function FieldRenderer({
 					label={<span className={labelClass}>{label}</span>}
 					id={id}
 					type="number"
+					step="any"
 					value={typeof value === "number" ? value : ""}
-					onChange={(e) => handleChange(Number(e.target.value))}
+					onChange={(e) => handleChange(e.target.value ? Number(e.target.value) : null)}
 					required={field.required}
 					min={range.min}
 					max={range.max}
