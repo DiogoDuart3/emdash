@@ -592,12 +592,6 @@ function stashSortValue(
 }
 
 /**
- * The entry id Astro addresses a row by: its slug, prefixed with the locale
- * whenever i18n routing would prefix the URL. Shared by every path that builds
- * a loader entry so a referenced entry carries the same id it would have been
- * loaded under directly.
- */
-/**
  * Fetch the draft revision snapshots for the rows a collection read should
  * serve as drafts, keyed by content row ID. One query per `SQL_BATCH_SIZE`
  * revisions; nothing runs unless `scope` is set.
@@ -605,7 +599,7 @@ function stashSortValue(
 async function loadDraftRevisions(
 	db: Kysely<Database>,
 	rows: Record<string, unknown>[],
-	scope: "all" | { id: string } | undefined,
+	scope: DraftRevisionScope | undefined,
 ): Promise<Map<string, Record<string, unknown>>> {
 	const drafts = new Map<string, Record<string, unknown>>();
 	if (!scope) return drafts;
@@ -683,6 +677,12 @@ function revisionEntry(
 	};
 }
 
+/**
+ * The entry id Astro addresses a row by: its slug, prefixed with the locale
+ * whenever i18n routing would prefix the URL. Shared by every path that builds
+ * a loader entry so a referenced entry carries the same id it would have been
+ * loaded under directly.
+ */
 function entryIdForRow(row: Record<string, unknown>): string {
 	const i18nConfig = virtualConfig?.i18n;
 	const slug = rowStr(row, "slug") || rowStr(row, "id");
@@ -1495,12 +1495,6 @@ export interface CollectionFilterBase {
 	 * When set, only returns content in this locale.
 	 */
 	locale?: string;
-	/**
-	 * Serve the draft revision's content instead of the content table row:
-	 * `"all"` for every entry (edit mode), or one entry's ID or slug (a
-	 * preview token, which is scoped to that entry).
-	 */
-	draftRevisions?: "all" | { id: string };
 }
 
 /** Keyset-paginated collection filter. Cannot also carry an `offset`. */
@@ -1533,6 +1527,16 @@ export interface OffsetCollectionFilter extends CollectionFilterBase {
  * exclusive ways to express "the next page" (cursor wins at runtime).
  */
 export type CollectionFilter = CursorCollectionFilter | OffsetCollectionFilter;
+
+/**
+ * Which entries a collection read serves from their draft revision: `"all"`
+ * (edit mode) or one entry's ID or slug (a preview token, scoped to that
+ * entry). Set by `getEmDashCollection` from the request context; not part of
+ * the public filter.
+ */
+type DraftRevisionScope = "all" | { id: string };
+
+type LoaderCollectionFilter = CollectionFilter & { draftRevisions?: DraftRevisionScope };
 
 /**
  * Filter for loadEntry - type and id are required
@@ -1621,7 +1625,7 @@ export async function loadPublishedDates(type: string, locale?: string) {
  * };
  * ```
  */
-export function emdashLoader(): LiveLoader<EntryData, EntryFilter, CollectionFilter> {
+export function emdashLoader(): LiveLoader<EntryData, EntryFilter, LoaderCollectionFilter> {
 	return {
 		name: "emdash",
 
