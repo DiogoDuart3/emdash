@@ -46,6 +46,7 @@ describe("Block picker layout", () => {
 					onChange={() => {}}
 					blockTypes={[blockType("hero", "Hero", description), blockType("quote", "Quote")]}
 					allowedTypes={["hero", "quote"]}
+					retiredTypes={[]}
 					renderField={() => null}
 				/>
 			</div>,
