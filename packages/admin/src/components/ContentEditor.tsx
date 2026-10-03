@@ -197,6 +197,8 @@ export interface FieldDescriptor {
 	blockTypeFingerprint?: string;
 	/** Value a new entry starts with. */
 	defaultValue?: unknown;
+	/** Set on `integer` fields, which share the `number` kind. */
+	integer?: boolean;
 }
 
 /**
@@ -2266,7 +2268,7 @@ function FieldRenderer({
 					label={<span className={labelClass}>{label}</span>}
 					id={id}
 					type="number"
-					step="any"
+					step={field.integer ? "1" : "any"}
 					value={typeof value === "number" ? value : ""}
 					onChange={(e) => handleChange(e.target.value ? Number(e.target.value) : null)}
 					required={field.required}
