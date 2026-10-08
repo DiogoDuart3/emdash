@@ -780,6 +780,62 @@ describe("ContentEditor", () => {
 			await expect.element(input).toBeValid();
 		});
 
+		it("rejects a decimal in an integer field inside a block", async () => {
+			const screen = await renderEditor({
+				isNew: false,
+				item: makeItem({
+					data: {
+						title: "Test",
+						layout: [{ _type: "event", _version: 1, _key: "first", seats: 40, price: 4 }],
+					},
+				}),
+				fields: {
+					title: { kind: "string", label: "Title", required: true },
+					layout: {
+						kind: "blocks",
+						label: "Layout",
+						validation: { allowedTypes: ["event"], retiredTypes: [] },
+						blockTypes: [
+							{
+								id: "event-type",
+								slug: "event",
+								label: "Event",
+								currentVersion: 1,
+								source: "user",
+								createdAt: "2026-01-01T00:00:00.000Z",
+								updatedAt: "2026-01-01T00:00:00.000Z",
+								versions: [
+									{
+										id: "event-v1",
+										blockTypeId: "event-type",
+										version: 1,
+										fields: [
+											{ slug: "seats", label: "Seats", type: "integer" },
+											{ slug: "price", label: "Price", type: "number" },
+										],
+										fingerprint: "one",
+										active: true,
+										createdAt: "2026-01-01T00:00:00.000Z",
+										updatedAt: "2026-01-01T00:00:00.000Z",
+									},
+								],
+							},
+						],
+					},
+				},
+			});
+
+			const seats = screen.getByLabelText("Seats", { exact: true });
+			await seats.fill("44.5");
+			await expect.element(seats).not.toBeValid();
+			await seats.fill("44");
+			await expect.element(seats).toBeValid();
+
+			const price = screen.getByLabelText("Price", { exact: true });
+			await price.fill("4.50");
+			await expect.element(price).toBeValid();
+		});
+
 		it("keeps URL values left-to-right inside an RTL editor", async () => {
 			document.documentElement.dir = "rtl";
 			try {

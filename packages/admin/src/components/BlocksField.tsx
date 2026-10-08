@@ -38,6 +38,8 @@ interface NestedFieldDescriptor {
 	required?: boolean;
 	options?: Array<{ value: string; label: string }> | Record<string, unknown>;
 	validation?: Record<string, unknown>;
+	/** Set on `integer` fields, which share the `number` kind. */
+	integer?: boolean;
 }
 
 interface NestedFieldRenderInput {
@@ -95,6 +97,7 @@ function nestedDescriptor(
 		required: field.required,
 		validation: field.validation,
 		options,
+		...(field.type === "integer" ? { integer: true } : {}),
 	};
 }
 
