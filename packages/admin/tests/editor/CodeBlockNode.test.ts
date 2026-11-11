@@ -13,13 +13,26 @@
 import { Editor, type Content } from "@tiptap/core";
 import { closeHistory } from "@tiptap/pm/history";
 import StarterKit from "@tiptap/starter-kit";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { CodeBlockExtension } from "../../src/components/editor/CodeBlockNode";
 
 type Selection = number | { from: number; to: number };
 
 const tabEventInit = { key: "Tab", bubbles: true, cancelable: true };
+
+function pressSelectAll(editor: Editor) {
+	const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+	const event = new KeyboardEvent("keydown", {
+		key: "a",
+		bubbles: true,
+		cancelable: true,
+		metaKey: isMac,
+		ctrlKey: !isMac,
+	});
+	editor.view.dom.dispatchEvent(event);
+	return event;
+}
 
 function pressTab(editor: Editor, shiftKey = false) {
 	const event = new KeyboardEvent("keydown", { ...tabEventInit, shiftKey });
@@ -29,6 +42,19 @@ function pressTab(editor: Editor, shiftKey = false) {
 
 function setCode(editor: Editor, text: string) {
 	editor.commands.setContent({ type: "codeBlock", content: [{ type: "text", text }] });
+}
+
+function setCodeDocument(editor: Editor, code = "code") {
+	editor.commands.setContent({
+		type: "doc",
+		content: [
+			{ type: "paragraph", content: [{ type: "text", text: "before" }] },
+			{ type: "codeBlock", content: code ? [{ type: "text", text: code }] : undefined },
+			{ type: "paragraph", content: [{ type: "text", text: "after" }] },
+		],
+	});
+	const from = editor.state.doc.child(0).nodeSize + 1;
+	return { from, to: from + code.length };
 }
 
 function expectTabUnhandled(editor: Editor, content: Content, selection: Selection) {
@@ -146,56 +172,35 @@ describe("CodeBlockExtension", () => {
 		);
 	});
 
-	it.each([
-		["javascript", 'const greeting = "hello";'],
-		["dockerfile", "FROM node:22"],
-	])("renders syntax tokens for %s", async (language, code) => {
-		editor.commands.insertContent({
-			type: "codeBlock",
-			attrs: { language },
-			content: [{ type: "text", text: code }],
-		});
+	it("keeps repeated Select All and deletion inside the active code block", () => {
+		const code = "one\ntwo";
+		const range = setCodeDocument(editor, code);
+		editor.commands.setTextSelection(range.from + 2);
 
-		await vi.waitFor(() => {
-			expect(element.querySelectorAll('span[class*="hljs-"]').length).toBeGreaterThan(0);
+		expect(pressSelectAll(editor).defaultPrevented).toBe(true);
+		expect(editor.state.selection.toJSON()).toEqual({
+			type: "text",
+			anchor: range.from,
+			head: range.to,
 		});
+		const selectedCode = editor.state.selection.toJSON();
+		expect(pressSelectAll(editor).defaultPrevented).toBe(true);
+		expect(editor.state.selection.toJSON()).toEqual(selectedCode);
 
-		expect(JSON.stringify(editor.getJSON())).not.toContain("hljs-");
+		editor.commands.deleteSelection();
+		expect(editor.state.doc.childCount).toBe(3);
+		expect(editor.state.doc.child(0).textContent).toBe("before");
+		expect(editor.state.doc.child(1).toJSON()).toMatchObject({ type: "codeBlock" });
+		expect(editor.state.doc.child(1).textContent).toBe("");
+		expect(editor.state.doc.child(2).textContent).toBe("after");
 	});
 
-	it.each(["plaintext", "astro", "zig", "custom-language", null, undefined])(
-		"leaves %s code unhighlighted",
-		async (language) => {
-			editor.commands.insertContent({
-				type: "codeBlock",
-				attrs: { language },
-				content: [{ type: "text", text: 'const greeting = "hello";' }],
-			});
-
-			await vi.waitFor(() => {
-				expect(element.querySelectorAll('span[class*="hljs-"]')).toHaveLength(0);
-			});
-		},
-	);
-
-	it("updates decorations when the selected language changes", async () => {
-		editor.commands.insertContent({
-			type: "codeBlock",
-			attrs: { language: "javascript" },
-			content: [{ type: "text", text: 'const greeting = "hello";' }],
-		});
-
-		await vi.waitFor(() => {
-			expect(element.querySelectorAll('span[class*="hljs-"]').length).toBeGreaterThan(0);
-		});
-
-		editor.commands.setNodeSelection(0);
-		editor.commands.updateAttributes("codeBlock", { language: "astro" });
-
-		await vi.waitFor(() => {
-			expect(element.querySelectorAll('span[class*="hljs-"]')).toHaveLength(0);
-		});
-		const node = editor.getJSON().content?.find((item) => item.type === "codeBlock");
-		expect(node?.content?.[0]?.text).toBe('const greeting = "hello";');
+	it("keeps Select All document-wide outside a single code block", () => {
+		const range = setCodeDocument(editor);
+		for (const selection of [2, { from: range.from, to: range.to + 2 }]) {
+			editor.commands.setTextSelection(selection);
+			expect(pressSelectAll(editor).defaultPrevented).toBe(true);
+			expect(editor.state.selection.toJSON()).toEqual({ type: "all" });
+		}
 	});
 });

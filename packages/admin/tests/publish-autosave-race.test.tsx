@@ -299,6 +299,21 @@ function contentMutations(requests: RecordedRequest[]) {
 	);
 }
 
+/**
+ * Advances fake time until the assertion passes. A save or publish settles in a
+ * render that fake timers don't drive, so on a slow machine the autosave
+ * debounce can start after a single fixed advance has already run.
+ */
+async function advanceUntil(assertion: () => void) {
+	await vi.waitFor(
+		async () => {
+			await vi.advanceTimersByTimeAsync(500);
+			assertion();
+		},
+		{ timeout: 5000 },
+	);
+}
+
 function deferredResponse() {
 	let resolve!: (response: Response) => void;
 	const promise = new Promise<Response>((next) => {
@@ -416,13 +431,18 @@ describe("ContentEditPage publish and autosave ordering", () => {
 		expect(contentMutations(server.requests).map(({ method }) => method)).toEqual(["PUT", "POST"]);
 
 		await title.fill("After publish");
-		await vi.advanceTimersByTimeAsync(2000);
+		await advanceUntil(() =>
+			expect(contentMutations(server!.requests).map(({ method }) => method)).toEqual([
+				"PUT",
+				"POST",
+				"PUT",
+			]),
+		);
 		const mutations = contentMutations(server.requests);
-		expect(mutations.map(({ method }) => method)).toEqual(["PUT", "POST", "PUT"]);
 		expect(mutations[2]?.body).toMatchObject({ _rev: "rev-publish-1" });
 	});
 
-	it("keeps edits made after a coalesced publish click dirty", async () => {
+	it("keeps edits made while publishing dirty", async () => {
 		const save = deferredResponse();
 		server = createMockServer({
 			onPut: (request, index) => {
@@ -450,7 +470,9 @@ describe("ContentEditPage publish and autosave ordering", () => {
 		await publishNow(screen);
 		await vi.waitFor(() => expect(contentMutations(server!.requests)).toHaveLength(1));
 		await title.fill("Second edit");
-		await publishNow(screen);
+		await expect
+			.element(screen.getByRole("button", { name: "Publish changes", exact: true }))
+			.toBeDisabled();
 
 		save.resolve(
 			contentResponse(
@@ -463,8 +485,7 @@ describe("ContentEditPage publish and autosave ordering", () => {
 				"POST",
 			]),
 		);
-		await vi.advanceTimersByTimeAsync(2000);
-		await vi.waitFor(() => expect(contentMutations(server!.requests)).toHaveLength(3));
+		await advanceUntil(() => expect(contentMutations(server!.requests)).toHaveLength(3));
 
 		const mutations = contentMutations(server.requests);
 		expect(mutations[2]?.body).toMatchObject({
@@ -543,8 +564,7 @@ describe("ContentEditPage publish and autosave ordering", () => {
 		expect(server.requests.filter((request) => request.method === "PUT")).toHaveLength(1);
 
 		await screen.getByRole("textbox", { name: "Title" }).fill("After schedule");
-		await vi.advanceTimersByTimeAsync(2000);
-		await vi.waitFor(() => {
+		await advanceUntil(() => {
 			expect(server!.requests.filter((request) => request.method === "PUT")).toHaveLength(2);
 		});
 		const nextSave = server.requests.filter((request) => request.method === "PUT")[1];
@@ -562,7 +582,10 @@ describe("ContentEditPage publish and autosave ordering", () => {
 				])?.data,
 			).toMatchObject({ title: "After schedule" });
 		});
-		await expect.element(screen.getByRole("button", { name: "Saved", exact: true })).toBeDisabled();
+		await expect
+			.element(screen.getByRole("button", { name: "Save", exact: true }))
+			.not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Saved", exact: true }).query()).toBeNull();
 
 		const removeSchedule = screen.getByRole("button", { name: "Remove schedule" });
 		await expect.element(removeSchedule).toBeInTheDocument();
@@ -576,8 +599,7 @@ describe("ContentEditPage publish and autosave ordering", () => {
 		expect(server.requests.filter((request) => request.method === "PUT")).toHaveLength(2);
 
 		await screen.getByRole("textbox", { name: "Title" }).fill("After unschedule");
-		await vi.advanceTimersByTimeAsync(2000);
-		await vi.waitFor(() => {
+		await advanceUntil(() => {
 			expect(server!.requests.filter((request) => request.method === "PUT")).toHaveLength(3);
 		});
 		const saveAfterUnschedule = server.requests.filter((request) => request.method === "PUT")[2];
@@ -842,12 +864,15 @@ describe("ContentEditPage publish and autosave ordering", () => {
 			dialog.getByRole("button", { name: "Schedule changes", exact: true }).element(),
 		);
 		await vi.waitFor(() => {
-			expect(server!.requests.filter((request) => request.method === "POST")).toHaveLength(1);
+			expect(
+				server!.requests.filter(
+					(request) => request.method === "POST" && request.url.includes("/schedule"),
+				),
+			).toHaveLength(1);
 		});
 
 		await title.fill("After schedule");
-		await vi.advanceTimersByTimeAsync(2000);
-		await vi.waitFor(() => {
+		await advanceUntil(() => {
 			expect(server!.requests.filter((request) => request.method === "PUT")).toHaveLength(2);
 		});
 		const saveAfterSchedule = server.requests.filter((request) => request.method === "PUT")[1];
@@ -1050,6 +1075,10 @@ describe("ContentEditPage actions during a save conflict", () => {
 		autosave.resolve(new Response());
 		await vi.advanceTimersByTimeAsync(1000);
 
+		// Waiting for the conflict also keeps the refused publish from leaking into the next test.
+		await expect
+			.element(screen.getByRole("button", { name: "Save anyway", exact: true }))
+			.toBeVisible();
 		expect(publishRequests()).toEqual([]);
 		expect(server.entry.data).toMatchObject({ title: "Other writer" });
 	});

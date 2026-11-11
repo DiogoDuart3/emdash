@@ -8,7 +8,9 @@
 import type { Element } from "@emdash-cms/blocks";
 import type { Kysely } from "kysely";
 
+import type { ContentWrite } from "../api/content-save.js";
 import type { ContentFieldFilters } from "../content-list-query.js";
+import type { ContentSeoInput } from "../database/repositories/types.js";
 import type {
 	PluginEditorExtensionDispatch,
 	ResolvedPluginEditorExtension,
@@ -48,9 +50,9 @@ export interface ManifestCollection {
 	titleField?: string;
 	dateField?: string;
 	/**
-	 * Omit the auto-generated sidebar entry and dashboard quick action in the
-	 * admin. The collection is still listed in the manifest so its routes,
-	 * editor, and API keep working.
+	 * Omit the auto-generated sidebar entry, dashboard quick action, and
+	 * dashboard Content card row in the admin. The collection is still listed
+	 * in the manifest so its routes, editor, and API keep working.
 	 */
 	hidden?: boolean;
 	/** Phosphor icon name for the sidebar entry (kebab-case, e.g. `calendar-blank`). */
@@ -83,6 +85,8 @@ export interface ManifestCollection {
 			id?: string;
 			/** Validation config for the field (e.g. `allowedMimeTypes` for file/image fields, subFields for repeater). */
 			validation?: Record<string, unknown>;
+			/** Value a new entry starts with in the admin editor. */
+			defaultValue?: unknown;
 		}
 	>;
 }
@@ -107,6 +111,7 @@ export interface ManifestPlugin {
 		path: string;
 		label?: string;
 		icon?: string;
+		group?: string;
 	}>;
 	dashboardWidgets?: Array<{
 		id: string;
@@ -152,6 +157,8 @@ export interface EmDashManifest {
 	 * registry plugin's `env:astro` requirement against the running host.
 	 */
 	astroVersion?: string;
+	/** Site title used for browser tab titles. */
+	siteTitle?: string;
 	/** IANA timezone used by datetime-local controls in the admin. */
 	timezone?: string;
 	collections: Record<string, ManifestCollection>;
@@ -164,10 +171,20 @@ export interface EmDashManifest {
 	 */
 	authMode: ManifestAuthMode;
 	/**
+	 * Whether the external auth provider replaces user names on every
+	 * authenticated request (`syncName` is not `false`). The admin shows the
+	 * name as managed by the identity provider instead of editable.
+	 */
+	providerManagedName?: boolean;
+	/**
 	 * Whether self-signup is enabled (at least one allowed domain is active).
 	 * Used by the login page to conditionally show the "Sign up" link.
 	 */
 	signupEnabled?: boolean;
+	/** Whether the site is in staging (hidden from search engines). */
+	staging?: boolean;
+	/** Whether this host runs co-editing rooms. When false, the editor doesn't ask to join one. */
+	coEditing?: boolean;
 	/**
 	 * i18n configuration from Astro config.
 	 * Only present when i18n is enabled (multiple locales configured).
@@ -245,6 +262,7 @@ export interface EmDashManifest {
 		siteName?: string;
 		footerLabel?: string | false;
 		favicon?: string;
+		hiddenNavItems?: string[];
 	};
 }
 
@@ -313,6 +331,7 @@ export interface EmDashHandlers {
 		id: string,
 		locale?: string,
 		referenceOptions?: { includeDrafts: boolean },
+		draftOptions?: { includeStagedSlug?: boolean },
 	) => Promise<
 		HandlerResponse<{
 			item: {
@@ -334,6 +353,7 @@ export interface EmDashHandlers {
 			bylines?: Array<{ bylineId: string; roleLabel?: string | null }>;
 			locale?: string;
 			translationOf?: string;
+			seo?: ContentSeoInput;
 			taxonomies?: Record<string, string[]>;
 			references?: Record<string, string[]>;
 			createdAt?: string | null;
@@ -368,10 +388,21 @@ export interface EmDashHandlers {
 			migrateBlocks?: boolean;
 			replaceBlocks?: boolean;
 			actor?: { id: string; role: number };
+			/** Users whose edits this save holds, latest first. Defaults to the actor alone. */
+			editedBy?: readonly string[];
 		},
-	) => Promise<HandlerResponse>;
+	) => Promise<
+		HandlerResponse & {
+			/** This save's own write, when it staged a draft revision and wrote no live metadata. */
+			saved?: ContentWrite;
+		}
+	>;
 
-	handleContentDelete: (collection: string, id: string) => Promise<HandlerResponse>;
+	handleContentDelete: (
+		collection: string,
+		id: string,
+		options?: { actor?: ActorInfo },
+	) => Promise<HandlerResponse>;
 
 	// Trash handlers
 	handleContentListTrashed: (
@@ -427,7 +458,7 @@ export interface EmDashHandlers {
 	handleContentUnschedule: (
 		collection: string,
 		id: string,
-		options?: { _rev?: string },
+		options?: { _rev?: string; actor?: ActorInfo },
 	) => Promise<HandlerResponse>;
 
 	handleContentCountScheduled: (collection: string) => Promise<HandlerResponse>;
@@ -435,7 +466,7 @@ export interface EmDashHandlers {
 	handleContentDiscardDraft: (
 		collection: string,
 		id: string,
-		options?: { _rev?: string },
+		options?: { _rev?: string; actor?: ActorInfo },
 	) => Promise<HandlerResponse>;
 
 	handleContentCompare: (collection: string, id: string) => Promise<HandlerResponse>;
@@ -513,6 +544,12 @@ export interface EmDashHandlers {
 		params?: { limit?: number },
 	) => Promise<HandlerResponse>;
 
+	handleRevisionEditors: (
+		collection: string,
+		entryId: string,
+		since: string | null,
+	) => Promise<HandlerResponse>;
+
 	handleRevisionGet: (revisionId: string) => Promise<
 		HandlerResponse<{
 			item: {
@@ -525,7 +562,15 @@ export interface EmDashHandlers {
 		}>
 	>;
 
-	handleRevisionRestore: (revisionId: string, callerUserId: string) => Promise<HandlerResponse>;
+	/**
+	 * A recovery revision restores as a save by the caller, with `role` or else their current
+	 * role.
+	 */
+	handleRevisionRestore: (
+		revisionId: string,
+		callerUserId: string,
+		role?: import("@emdash-cms/auth").RoleLevel,
+	) => Promise<HandlerResponse>;
 
 	// Plugin API route handler. `user` is the authenticated caller for
 	// private routes, exposed to plugin handlers as `ctx.user`.
@@ -554,7 +599,14 @@ export interface EmDashHandlers {
 		request: Request,
 	) => Promise<HandlerResponse>;
 
-	// Plugin route metadata (for auth/caching decisions before dispatch)
+	// Public-only plugin route metadata for SSR page components.
+	// Public routes return their meta. Private and unknown routes return null.
+	// Present on both anonymous and signed-in locals so the result does not
+	// change when a visitor logs in.
+	getPublicPluginRouteMeta: (pluginId: string, path: string) => RouteMeta | null;
+
+	// Plugin route metadata (for auth/caching decisions before dispatch).
+	// Signed-in locals only. Private routes return `{ public: false }`.
 	getPluginRouteMeta: (pluginId: string, path: string) => RouteMeta | null;
 	getEnabledPluginMcpTools: () => Promise<
 		Array<{
@@ -637,6 +689,10 @@ export interface EmDashHandlers {
 	// routes; logged-out requests don't need it. Per-request, deduplicated
 	// by `requestCached`.
 	getManifest: () => Promise<EmDashManifest>;
+
+	// Co-editing rooms. Null where co-editing is off or the host can't run
+	// rooms, which gives every join single-editor mode.
+	rooms: import("../rooms/types.js").RuntimeRoomHost | null;
 
 	// Clear the cached URL patterns used by `resolveEmDashPath`. Call after
 	// any schema mutation that creates/updates/deletes a collection's

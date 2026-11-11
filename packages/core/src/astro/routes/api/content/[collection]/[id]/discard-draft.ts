@@ -11,6 +11,7 @@ import { apiError, mapErrorStatus, unwrapResult } from "#api/error.js";
 import { claimEntryLockForWrite } from "#api/handlers/entry-lock.js";
 import { isParseError, parseOptionalBody } from "#api/parse.js";
 import { contentRevisionConditionBody } from "#api/schemas.js";
+import { invalidateRouteCache } from "#cache/route-cache.js";
 
 export const prerender = false;
 
@@ -64,11 +65,12 @@ export const POST: APIRoute = async ({ params, request, locals, url, cache }) =>
 
 	const result = await emdash.handleContentDiscardDraft(collection, resolvedId, {
 		_rev: body?._rev,
+		actor: { id: user!.id, role: user!.role },
 	});
 
 	if (!result.success) return unwrapResult(result);
 
-	if (cache?.enabled) await cache.invalidate({ tags: [collection, resolvedId] });
+	await invalidateRouteCache(cache, [collection, resolvedId]);
 
 	return unwrapResult(result);
 };

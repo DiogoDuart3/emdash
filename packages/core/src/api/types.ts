@@ -55,6 +55,7 @@ export interface ManifestCollectionDescriptor {
 	urlPattern?: string;
 	routable?: boolean;
 	titleField?: string;
+	/** Field slug or system timestamp (`publishedAt`, `createdAt`, or `updatedAt`) for the admin list Date column. */
 	dateField?: string;
 	hidden?: boolean;
 	/** Phosphor icon name for the admin sidebar entry */
@@ -74,6 +75,10 @@ export interface ManifestFieldDescriptor extends FieldDescriptor {
 	unsupportedType?: { type: string; path: string };
 	blockTypes?: BlockType[];
 	blockTypeFingerprint?: string;
+	/** Value a new entry starts with in the admin editor. */
+	defaultValue?: unknown;
+	/** Set on `integer` fields, which share the `number` kind. */
+	integer?: boolean;
 }
 
 export interface FieldDescriptor {
@@ -105,6 +110,8 @@ export type ApiResult<T, E extends string = string> =
 	| {
 			success: false;
 			error: { code: E; message: string; details?: Record<string, unknown> };
+			/** The HTTP status, where the error code alone doesn't decide it. */
+			status?: number;
 	  };
 
 /**

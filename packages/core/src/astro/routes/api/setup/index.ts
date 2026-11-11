@@ -15,8 +15,9 @@ import { setupBody } from "#api/schemas.js";
 import { getAuthMode } from "#auth/mode.js";
 import { OptionsRepository } from "#db/repositories/options.js";
 import { applySeedWithinBudget, type SeedApplyBudget } from "#seed/apply.js";
-import { loadSeed } from "#seed/load.js";
+import { loadSeed, loadSeedMediaBasePath } from "#seed/load.js";
 import { validateSeed } from "#seed/validate.js";
+import { invalidateSiteSettingsCache, setSiteSettings } from "#settings/index.js";
 
 /**
  * What one setup request may spend on the seed before the rest continues in
@@ -82,6 +83,7 @@ export const POST: APIRoute = async ({ request, url, locals }) => {
 
 		// Load seed file (user seed or built-in default)
 		const seed = await loadSeed();
+		const mediaBasePath = await loadSeedMediaBasePath();
 
 		// Override seed settings with form values
 		seed.settings = {
@@ -104,6 +106,7 @@ export const POST: APIRoute = async ({ request, url, locals }) => {
 				{
 					includeContent: body.includeContent,
 					onConflict: "skip",
+					mediaBasePath,
 					storage: emdash.storage ?? undefined,
 				},
 				SEED_BUDGET_PER_REQUEST,
@@ -112,6 +115,12 @@ export const POST: APIRoute = async ({ request, url, locals }) => {
 			return handleError(error, "Failed to apply seed", "SEED_ERROR");
 		}
 		const { result, complete: seedComplete, progress: seedProgress } = seeded;
+
+		if (seedComplete) {
+			// The seed only fills settings that are still unset, and the runtime
+			// has usually auto-seeded the template's title and tagline already.
+			await setSiteSettings({ title: body.title, tagline: body.tagline }, emdash.db);
+		}
 
 		// Store setup state
 		// In external auth mode, mark setup complete immediately (first user to login becomes admin)
@@ -128,6 +137,7 @@ export const POST: APIRoute = async ({ request, url, locals }) => {
 			// on a later call during the wizard window must not be able to
 			// replace the first value.
 			await options.setIfAbsent("emdash:site_url", siteUrl);
+			if (await options.setIfAbsent("site:staging", true)) invalidateSiteSettingsCache();
 
 			if (seedComplete) {
 				if (useExternalAuth) {

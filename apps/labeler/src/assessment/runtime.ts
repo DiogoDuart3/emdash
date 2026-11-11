@@ -1,7 +1,10 @@
 import {
 	AtprotoWebDidDocumentResolver,
 	CompositeDidDocumentResolver,
+	CompositeHandleResolver,
+	DohJsonHandleResolver,
 	PlcDidDocumentResolver,
+	WellKnownHandleResolver,
 } from "@atcute/identity-resolver";
 import { isDid, type AtprotoDid } from "@atcute/lexicons/syntax";
 import { REGISTRY_CUMULUS_ORIGIN } from "@emdash-cms/registry-lexicons";
@@ -9,27 +12,29 @@ import { INITIAL_LISTING_POLICY_FIXTURE } from "@emdash-cms/registry-moderation/
 import { fetchVerifiedResource } from "@emdash-cms/registry-verification/fetch";
 
 import {
+	CLEF_IMAGE_ASSESSMENT_SETTINGS,
+	CLEF_TEXT_ASSESSMENT_SETTINGS,
+	createClefImageAdapter,
+	createClefTextAdapter,
+	requireClefModelId,
+} from "../ai/clef.js";
+import {
 	createCloudflareImagesDerivativeTransformer,
 	createResizedImageModerationAdapter,
 	DEFAULT_MODERATION_IMAGE_DERIVATIVE_OPTIONS,
 } from "../ai/image-resize.js";
-import { createUnanimousTextModerationAdapter } from "../ai/unanimous.js";
-import {
-	createWorkersAiImageAdapter,
-	createWorkersAiTextAdapter,
-	workersAiBindingFromEnv,
-} from "../ai/workers-ai.js";
+import { workersAiBindingFromEnv } from "../ai/workers-ai.js";
 import { createD1ListingLabelIssuer, type ListingLabelIssuer } from "../labels/issuer.js";
 import {
 	LABELER_POLICY_EFFECTIVE_AT,
 	readLabelerRuntimeConfig,
 	type LabelerRuntimeConfig,
 } from "../runtime-config.js";
-import { createDohHostnameResolver } from "../runtime-network.js";
+import { createDohHostnameResolver, DOH_ENDPOINT } from "../runtime-network.js";
 import { createLabelPublicationTarget } from "../subscriptions/publisher.js";
 import { createD1AssessmentLifecycleStore } from "./lifecycle.js";
 import { createGuardedMediaAcquirer } from "./media.js";
-import { publisherHandleFromDidDocument } from "./publisher-identity.js";
+import { publisherHandleFromDidDocument, verifiedHandleDid } from "./publisher-identity.js";
 import { createAtprotoExactRecordVerifier } from "./records.js";
 import {
 	createCloudflareImagesDecoder,
@@ -49,23 +54,17 @@ export async function createProductionAssessmentWorkflowDependencies(
 	const ai = workersAiBindingFromEnv(env.AI);
 	const { connect } = await import("cloudflare:sockets");
 	const issuer = await createProductionListingLabelIssuer(env, config);
-	const textAdapter = createUnanimousTextModerationAdapter([
-		createWorkersAiTextAdapter(ai, {
-			modelId: config.textModelIds[0],
-			promptHash: config.versions.textPromptHash,
-		}),
-		createWorkersAiTextAdapter(ai, {
-			modelId: config.textModelIds[1],
-			promptHash: config.versions.textPromptHash,
-			thinking: false,
-		}),
-	]);
+	const textAdapter = createClefTextAdapter(ai, {
+		...CLEF_TEXT_ASSESSMENT_SETTINGS,
+		modelId: requireClefModelId(config.versions.textModelId),
+		promptHash: config.versions.textPromptHash,
+	});
 	const imageAdapter = createResizedImageModerationAdapter(
 		createCloudflareImagesDerivativeTransformer(env.IMAGES),
-		createWorkersAiImageAdapter(ai, {
-			modelId: config.versions.imageModelId,
+		createClefImageAdapter(ai, {
+			...CLEF_IMAGE_ASSESSMENT_SETTINGS,
+			modelId: requireClefModelId(config.versions.imageModelId),
 			promptHash: config.versions.imagePromptHash,
-			thinking: false,
 		}),
 		DEFAULT_MODERATION_IMAGE_DERIVATIVE_OPTIONS,
 	);
@@ -121,6 +120,17 @@ export async function resolveProductionPublisherHandle(
 	const document = await createProductionDidResolver(resolveHostname).resolve(publisherDid);
 	if (document.id !== publisherDid) return null;
 	return publisherHandleFromDidDocument(document);
+}
+
+export async function resolveProductionHandleDid(handle: string): Promise<string | null> {
+	const resolveHostname = createDohHostnameResolver();
+	const handleResolver = new CompositeHandleResolver({
+		methods: {
+			dns: new DohJsonHandleResolver({ dohUrl: DOH_ENDPOINT }),
+			http: new WellKnownHandleResolver({ fetch: createGuardedIdentityFetch(resolveHostname) }),
+		},
+	});
+	return verifiedHandleDid(handle, handleResolver, createProductionDidResolver(resolveHostname));
 }
 
 export async function createProductionListingLabelIssuer(

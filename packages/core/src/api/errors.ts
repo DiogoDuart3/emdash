@@ -17,6 +17,8 @@ export const ErrorCode = {
 	INVALID_JSON: "INVALID_JSON",
 	INVALID_CURSOR: "INVALID_CURSOR",
 	CONFLICT: "CONFLICT",
+	/** A list the save was based on changed; read the entry again and rebase the change. */
+	LIST_CONFLICT: "LIST_CONFLICT",
 	SLUG_CONFLICT: "SLUG_CONFLICT",
 	NOT_CONFIGURED: "NOT_CONFIGURED",
 	BINDING_NOT_FOUND: "BINDING_NOT_FOUND",
@@ -28,6 +30,7 @@ export const ErrorCode = {
 	NOT_IMPLEMENTED: "NOT_IMPLEMENTED",
 	NOT_SUPPORTED: "NOT_SUPPORTED",
 	MISSING_PARAM: "MISSING_PARAM",
+	DOMAIN_CHECK_FAILED: "DOMAIN_CHECK_FAILED",
 	CSRF_REJECTED: "CSRF_REJECTED",
 
 	// Content
@@ -126,6 +129,9 @@ export const ErrorCode = {
 	WORK_CHANGED: "WORK_CHANGED",
 	ENTRY_LOCKED: "ENTRY_LOCKED",
 	ENTRY_LOCK_ERROR: "ENTRY_LOCK_ERROR",
+	ROOM_BUSY: "ROOM_BUSY",
+	CLIENT_OUTDATED: "CLIENT_OUTDATED",
+	ROOM_UNSUPPORTED_CONTENT: "ROOM_UNSUPPORTED_CONTENT",
 	NO_STORAGE: "NO_STORAGE",
 	NO_FILE: "NO_FILE",
 	INVALID_TYPE: "INVALID_TYPE",
@@ -185,6 +191,9 @@ export const ErrorCode = {
 	SIGNUP_VERIFY_ERROR: "SIGNUP_VERIFY_ERROR",
 	SIGNUP_COMPLETE_ERROR: "SIGNUP_COMPLETE_ERROR",
 	RECOVERY_SEND_ERROR: "RECOVERY_SEND_ERROR",
+	MAGIC_LINK_VERIFY_ERROR: "MAGIC_LINK_VERIFY_ERROR",
+	NO_SITE_URL: "NO_SITE_URL",
+	SIGN_IN_HANDOVER_ERROR: "SIGN_IN_HANDOVER_ERROR",
 	USER_LIST_ERROR: "USER_LIST_ERROR",
 	USER_DETAIL_ERROR: "USER_DETAIL_ERROR",
 	USER_UPDATE_ERROR: "USER_UPDATE_ERROR",
@@ -360,6 +369,9 @@ export const ErrorCode = {
 	SETTINGS_UPDATE_ERROR: "SETTINGS_UPDATE_ERROR",
 	EMAIL_SETTINGS_READ_ERROR: "EMAIL_SETTINGS_READ_ERROR",
 	EMAIL_TEST_ERROR: "EMAIL_TEST_ERROR",
+	SITE_DOMAIN_ERROR: "SITE_DOMAIN_ERROR",
+	DOMAIN_PROOF_ERROR: "DOMAIN_PROOF_ERROR",
+	DOMAIN_MOVE_NOTICE_ERROR: "DOMAIN_MOVE_NOTICE_ERROR",
 
 	// Backups
 	BACKUP_SETTINGS_READ_ERROR: "BACKUP_SETTINGS_READ_ERROR",
@@ -371,6 +383,7 @@ export const ErrorCode = {
 	BACKUP_DOWNLOAD_ERROR: "BACKUP_DOWNLOAD_ERROR",
 
 	// Search
+	SEARCH_UNAVAILABLE: "SEARCH_UNAVAILABLE",
 	SEARCH_ERROR: "SEARCH_ERROR",
 	STATS_ERROR: "STATS_ERROR",
 	SUGGESTION_ERROR: "SUGGESTION_ERROR",
@@ -506,6 +519,7 @@ export function mapErrorStatus(code: string | undefined): number {
 
 		// 409 Conflict
 		case ErrorCode.CONFLICT:
+		case ErrorCode.LIST_CONFLICT:
 		case ErrorCode.SLUG_CONFLICT:
 		case ErrorCode.COLLECTION_EXISTS:
 		case ErrorCode.COLLECTION_TABLE_ORPHANED:
@@ -513,6 +527,7 @@ export function mapErrorStatus(code: string | undefined): number {
 		case ErrorCode.CREDENTIAL_EXISTS:
 		case ErrorCode.EMAIL_IN_USE:
 		case ErrorCode.USER_EXISTS:
+		case ErrorCode.NO_SITE_URL:
 		case ErrorCode.PLUGIN_ID_CONFLICT:
 		case ErrorCode.ALREADY_INSTALLED:
 		case ErrorCode.ALREADY_CONFIGURED:
@@ -522,6 +537,9 @@ export function mapErrorStatus(code: string | undefined): number {
 		case ErrorCode.WORK_LEASE_ACTIVE:
 		case ErrorCode.WORK_CHANGED:
 		case ErrorCode.ENTRY_LOCKED:
+		case ErrorCode.ROOM_BUSY:
+		case ErrorCode.CLIENT_OUTDATED:
+		case ErrorCode.ROOM_UNSUPPORTED_CONTENT:
 		case ErrorCode.BLOCK_TYPE_EXISTS:
 		case ErrorCode.BLOCK_TYPE_BREAKING_CHANGE:
 		case ErrorCode.BLOCK_TYPE_VERSION_CONFLICT:
@@ -543,6 +561,7 @@ export function mapErrorStatus(code: string | undefined): number {
 		case ErrorCode.CHECKSUM_MISMATCH:
 		case ErrorCode.INVALID_BUNDLE:
 		case ErrorCode.BUNDLE_EXTRACT_FAILED:
+		case ErrorCode.DOMAIN_CHECK_FAILED:
 			return 422;
 
 		// 429 Too Many Requests
@@ -572,6 +591,7 @@ export function mapErrorStatus(code: string | undefined): number {
 			return 502;
 
 		// 503 Service Unavailable
+		case ErrorCode.SEARCH_UNAVAILABLE:
 		case ErrorCode.MARKETPLACE_UNAVAILABLE:
 		case ErrorCode.MARKETPLACE_NOT_CONFIGURED:
 		case ErrorCode.SANDBOX_NOT_AVAILABLE:

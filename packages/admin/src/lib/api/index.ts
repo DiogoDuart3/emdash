@@ -9,6 +9,7 @@ export {
 	API_BASE,
 	ApiResponseError,
 	apiFetch,
+	isListConflict,
 	isTerminalRequestError,
 	parseApiResponse,
 	throwResponseError,
@@ -28,6 +29,8 @@ export {
 	type TrashedContentItem,
 	type PreviewUrlResponse,
 	type Revision,
+	type RevisionAuthor,
+	type RevisionListItem,
 	type RevisionListResponse,
 	type TranslationSummary,
 	type TranslationsResponse,
@@ -53,6 +56,7 @@ export {
 	discardDraft,
 	compareRevisions,
 	fetchRevisions,
+	fetchRevisionEditors,
 	fetchRevision,
 	restoreRevision,
 } from "./content.js";
@@ -141,8 +145,13 @@ export {
 export {
 	type SiteSettings,
 	type SiteSettingsUpdate,
+	type SiteDomain,
 	fetchSettings,
 	updateSettings,
+	fetchSiteDomain,
+	changeSiteDomain,
+	createSignInHandover,
+	notifyUsersOfDomain,
 } from "./settings.js";
 
 // Users, passkeys, allowed domains

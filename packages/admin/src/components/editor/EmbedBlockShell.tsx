@@ -8,7 +8,7 @@ import { Button, DropdownMenu, Tabs } from "@cloudflare/kumo";
 import type { MessageDescriptor } from "@lingui/core";
 import { useLingui } from "@lingui/react/macro";
 import { DotsThreeVertical, Trash } from "@phosphor-icons/react";
-import { Node, type Editor } from "@tiptap/core";
+import type { Editor } from "@tiptap/core";
 import { GapCursor } from "@tiptap/pm/gapcursor";
 import type { NodeType } from "@tiptap/pm/model";
 import { NodeSelection, Selection } from "@tiptap/pm/state";
@@ -18,7 +18,11 @@ import * as React from "react";
 
 import { cn } from "../../lib/utils";
 import { getLocaleDir } from "../../locales/config.js";
+import { enterBlockSelection } from "./BlockCommands.js";
 import type { CodeEditorProps } from "./CodeEditor";
+import { useAttachedKey } from "./useAttachedKey.js";
+
+export { TopBlockDocument } from "../../portable-text/schema.js";
 
 const CodeEditor = React.lazy(() => import("./CodeEditor"));
 
@@ -29,17 +33,6 @@ const CodeEditor = React.lazy(() => import("./CodeEditor"));
 export const CLIPBOARD_TOKEN = Array.from(crypto.getRandomValues(new Uint32Array(4)), (n) =>
 	n.toString(36),
 ).join("");
-
-/**
- * Document node that also accepts `topBlock` nodes. Quotes, list items and
- * table cells accept only `block`, so ProseMirror can't nest a top-level
- * block there, where the Portable Text converters would drop it.
- */
-export const TopBlockDocument = Node.create({
-	name: "doc",
-	topNode: true,
-	content: "(block | topBlock)+",
-});
 
 /**
  * The code editor owns every event inside it, including dropped text, except
@@ -135,7 +128,8 @@ export function EmbedCodeEditor(props: CodeEditorProps) {
  * - while the code editor has focus, the editor's selection sits beside the
  *   block, so toolbar actions don't replace it, and pending edits are
  *   written before any press outside the code editor runs its action;
- * - Escape selects the block and returns focus to the editor.
+ * - Escape selects the block, as it does in text, and returns focus to the
+ *   editor.
  */
 export function useEmbedBlockFocus({
 	editor,
@@ -224,6 +218,7 @@ export function useEmbedBlockFocus({
 		if (typeof pos !== "number") return;
 		editor.commands.setNodeSelection(pos);
 		editor.view.focus();
+		enterBlockSelection(editor);
 	};
 
 	const deleteBlock = () => {
@@ -271,7 +266,6 @@ export interface EmbedBlockTab {
 /** The block's card: its tabs, its menu and the panel for the active tab. */
 export function EmbedBlockCard({
 	className,
-	selected,
 	editable,
 	tabs,
 	activeTab,
@@ -283,7 +277,6 @@ export function EmbedBlockCard({
 	children,
 }: {
 	className: string;
-	selected: boolean;
 	editable: boolean;
 	tabs: readonly EmbedBlockTab[];
 	activeTab: string;
@@ -297,20 +290,19 @@ export function EmbedBlockCard({
 }) {
 	const { t, i18n } = useLingui();
 	const active = tabs.find((tab) => tab.value === activeTab);
+	const tabsKey = useAttachedKey(focus.cardRef);
 	return (
-		<NodeViewWrapper className={cn(className, "not-prose my-3")} contentEditable={false}>
+		<NodeViewWrapper className={cn(className, "not-prose my-4")} contentEditable={false}>
 			{/* The editor's content takes its direction from the text; the card's
 			    controls follow the interface, as their arrow keys already do. */}
 			<div
 				dir={getLocaleDir(i18n.locale)}
 				ref={focus.cardRef}
-				className={cn(
-					"overflow-hidden rounded-lg border border-kumo-line bg-kumo-base focus-within:border-kumo-brand",
-					selected && "ring-2 ring-kumo-brand",
-				)}
+				className="overflow-hidden rounded-lg border border-kumo-line bg-kumo-base focus-within:border-kumo-brand"
 			>
 				<div className="flex items-center gap-2 p-1.5">
 					<Tabs
+						key={tabsKey}
 						variant="segmented"
 						size="sm"
 						activateOnFocus

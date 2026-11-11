@@ -6,6 +6,7 @@ import { requirePerm, requireOwnerPerm } from "../api/authorize.js";
 import { apiError, apiSuccess } from "../api/error.js";
 import { requireScope } from "../auth/scopes.js";
 import type { EmDashRuntime, PluginEditorExtensionDispatch } from "../emdash-runtime.js";
+import { roomId } from "../rooms/types.js";
 import {
 	validateEditorDraftPatch,
 	validateEditorDraftRequest,
@@ -131,7 +132,11 @@ export async function dispatchPluginApiRequest({
 				? "Plugin route error"
 				: (result.error?.message ?? "Plugin route error");
 		const status = (result as { status?: number }).status ?? (code === "NOT_FOUND" ? 404 : 400);
-		return apiError(code, message, status);
+		const details =
+			code !== "INTERNAL_ERROR" && result.error && "details" in result.error
+				? result.error.details
+				: undefined;
+		return apiError(code, message, status, isRecord(details) ? details : undefined);
 	}
 
 	let response: Response;
@@ -306,6 +311,7 @@ export async function dispatchPluginEditorExtensionApiRequest({
 			patchSelector: definition.extension.draft?.patch,
 			canRead: definition.capabilities.includes("admin.editor-draft:read"),
 			canPatch: definition.capabilities.includes("admin.editor-draft:patch"),
+			roomOpen: (await runtime.rooms?.isOpen(roomId({ collection, id: canonicalId }))) ?? false,
 		});
 		if ("code" in draft) {
 			console.warn(
@@ -321,7 +327,7 @@ export async function dispatchPluginEditorExtensionApiRequest({
 	headers.delete("content-length");
 	headers.delete("content-encoding");
 	headers.set("Content-Type", "application/json");
-	const pluginRequest = new Request(request.url, {
+	const pluginRequest = new Request(request, {
 		method: "POST",
 		headers,
 		body: JSON.stringify(input),

@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { InlinePortableTextEditor } from "../../../src/components/InlinePortableTextEditor.js";
 import { renderToolbar } from "../../../src/visual-editing/toolbar.js";
+import { GERMAN_TOOLBAR_LABELS } from "../../utils/toolbar-labels.js";
 
 const LABELS = {
 	publish: "Publish",
@@ -19,6 +20,26 @@ const LABELS = {
 	editMode: "Edit",
 	openInAdmin: "Open in admin",
 	hideToolbar: "Hide toolbar",
+	draft: "Draft",
+	published: "Published",
+	unpublishedChanges: "Unpublished changes",
+	unsaved: "Unsaved",
+	saving: "Saving…",
+	saved: "Saved",
+	saveFailed: "Save failed",
+	image: "Image",
+	noImageSelected: "No image selected",
+	altText: "Alt text",
+	altTextPlaceholder: "Describe the image",
+	replaceImage: "Replace",
+	uploadImage: "Upload",
+	removeImage: "Remove",
+	mediaLibrary: "Media Library",
+	back: "Back",
+	loading: "Loading…",
+	noImagesFound: "No images found",
+	mediaLoadFailed: "Failed to load media",
+	uploadingFile: "Uploading {filename}…",
 };
 
 const MANIFEST = {
@@ -39,7 +60,10 @@ function ref(field: string): string {
 	return JSON.stringify({ collection: "posts", id: "post-1", field });
 }
 
-function mountEditablePage(content: string, options: { hidden?: boolean } = {}): void {
+function mountEditablePage(
+	content: string,
+	options: { hidden?: boolean; labels?: typeof LABELS } = {},
+): void {
 	const toolbar = renderToolbar({ editMode: true, isPreview: false, labels: LABELS, ...options });
 	document.body.innerHTML = content + toolbar;
 	for (const script of document.body.querySelectorAll("script")) {
@@ -47,14 +71,15 @@ function mountEditablePage(content: string, options: { hidden?: boolean } = {}):
 	}
 }
 
-/** Serves the manifest and the stored post. Pass `manifest` to control when the manifest arrives. */
+/** Serves the manifest, the stored post and saves. Pass `manifest` or `save` to control their answers. */
 function stubApi(
 	stored: Record<string, unknown> = {},
 	manifest: Promise<Response> = Promise.resolve(Response.json(MANIFEST)),
+	save: () => Promise<Response> = async () => Response.json({ success: true, data: {} }),
 ) {
 	const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
 		if (url === "/_emdash/api/manifest") return manifest;
-		if (init?.method === "PUT") return Response.json({ success: true, data: {} });
+		if (init?.method === "PUT") return save();
 		return Response.json({ success: true, data: { item: { data: stored } } });
 	});
 	vi.stubGlobal("fetch", fetchMock);
@@ -100,6 +125,294 @@ afterEach(() => {
 	document.body.innerHTML = "";
 });
 
+describe("toolbar language", () => {
+	function toolbarText() {
+		return {
+			saveStatus: document.getElementById("emdash-tb-save-status")!.textContent,
+			entryStatus: document.getElementById("emdash-tb-status")!.textContent,
+			publish: document.getElementById("emdash-tb-publish")!.textContent,
+		};
+	}
+
+	/** Stubs the API with a content save that stays in flight until it is answered. */
+	function holdSave(): (status: number) => void {
+		let answer!: (status: number) => void;
+		stubApi(
+			{},
+			undefined,
+			() =>
+				new Promise<Response>((resolve) => {
+					answer = (status) => resolve(new Response(null, { status }));
+				}),
+		);
+		return (status) => answer(status);
+	}
+
+	async function startEditingTitle(): Promise<HTMLElement> {
+		mountEditablePage(`<h1 data-emdash-ref='${ref("title")}'>Hello</h1>`, {
+			labels: GERMAN_TOOLBAR_LABELS,
+		});
+		const title = document.querySelector("h1")!;
+		title.click();
+		await waitForEditing(title);
+		return title;
+	}
+
+	it("keeps Publish in the editor's language after a save leaves unpublished changes", async () => {
+		const answerSave = holdSave();
+		const title = await startEditingTitle();
+
+		title.textContent = "Hallo";
+		title.dispatchEvent(new FocusEvent("blur"));
+		answerSave(200);
+
+		await vi.waitFor(() =>
+			expect(toolbarText()).toEqual({
+				saveStatus: "Gespeichert",
+				entryStatus: "Unveröffentlichte Änderungen",
+				publish: "Veröffentlichen",
+			}),
+		);
+
+		// An unanswered publish keeps jsdom from reloading the page.
+		vi.stubGlobal("fetch", () => new Promise<Response>(() => {}));
+		document.getElementById("emdash-tb-publish")!.click();
+
+		await vi.waitFor(() => expect(toolbarText().publish).toBe("Wird veröffentlicht…"));
+	});
+
+	it.each([
+		["succeeds", 200, "Gespeichert"],
+		["fails", 500, "Speichern fehlgeschlagen"],
+	])("shows a save that %s in the editor's language", async (_outcome, status, outcomeBadge) => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		const answerSave = holdSave();
+		const title = await startEditingTitle();
+
+		title.textContent = "Hallo";
+		title.dispatchEvent(new Event("input"));
+		expect(toolbarText().saveStatus).toBe("Nicht gespeichert");
+
+		title.dispatchEvent(new FocusEvent("blur"));
+		expect(toolbarText().saveStatus).toBe("Wird gespeichert…");
+
+		answerSave(status);
+		await vi.waitFor(() => expect(toolbarText().saveStatus).toBe(outcomeBadge));
+	});
+
+	it.each([
+		["a draft", { status: "draft" }, "Entwurf"],
+		[
+			"a published entry with changes",
+			{ status: "published", hasDraft: true },
+			"Unveröffentlichte Änderungen",
+		],
+		["a published entry", { status: "published" }, "Veröffentlicht"],
+	])("labels %s in the editor's language", (_entry, state, badge) => {
+		stubApi();
+		const entry = JSON.stringify({ collection: "posts", id: "post-1", ...state });
+		mountEditablePage(`<article data-emdash-ref='${entry}'></article>`, {
+			labels: GERMAN_TOOLBAR_LABELS,
+		});
+
+		expect(toolbarText().entryStatus).toBe(badge);
+	});
+});
+
+describe("toolbar admin link", () => {
+	it("opens each entry in its own admin window", () => {
+		stubApi();
+		const entry = JSON.stringify({ collection: "posts", id: "post-1", status: "published" });
+		mountEditablePage(`<article data-emdash-ref='${entry}'></article>`);
+
+		const adminLink = document.getElementById("emdash-tb-admin") as HTMLAnchorElement;
+		expect(adminLink.getAttribute("href")).toBe("/_emdash/admin/content/posts/post-1");
+		expect(adminLink.target).toBe("emdash-admin-posts/post-1");
+	});
+});
+
+describe("toolbar multi-entry publishing", () => {
+	function entry(id: string, state: Record<string, unknown> = {}, collection = "posts") {
+		return `<h2 data-emdash-ref='${JSON.stringify({ collection, id, field: "title", status: "published", ...state })}'>${id}</h2>`;
+	}
+
+	function publishButton() {
+		return document.getElementById("emdash-tb-publish") as HTMLButtonElement;
+	}
+
+	function holdPublishing() {
+		const published: string[] = [];
+		let answer!: (response: Response) => void;
+		let reject!: (error: Error) => void;
+		const reload = vi.fn();
+		vi.stubGlobal("location", { reload });
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (url: string) => {
+				if (url.endsWith("/publish")) {
+					published.push(url);
+					return new Promise<Response>((resolve, rejectRequest) => {
+						answer = resolve;
+						reject = rejectRequest;
+					});
+				}
+				return Response.json(MANIFEST);
+			}),
+		);
+		return {
+			published,
+			reload,
+			answer: (response: Response) => answer(response),
+			reject: (error: Error) => reject(error),
+		};
+	}
+
+	it("finds drafts after a published entry and ignores malformed and duplicate annotations", async () => {
+		const api = holdPublishing();
+		mountEditablePage(
+			`<div data-emdash-ref='invalid'></div>` +
+				entry("live") +
+				entry("pending", { hasDraft: true }) +
+				entry("pending", { hasDraft: true }) +
+				entry("new", { status: "draft" }),
+		);
+		expect(document.getElementById("emdash-tb-status")!.textContent).toBe("Draft");
+		expect(publishButton().style.display).not.toBe("none");
+		publishButton().click();
+		await vi.waitFor(() => expect(api.published).toHaveLength(1));
+		api.answer(new Response(null, { status: 200 }));
+		await vi.waitFor(() => expect(api.published).toHaveLength(2));
+		expect(api.published).toEqual([
+			"/_emdash/api/visual-editing/content/posts/pending/publish",
+			"/_emdash/api/visual-editing/content/posts/new/publish",
+		]);
+	});
+
+	it("shows unpublished changes when only a later entry has a draft", () => {
+		holdPublishing();
+		mountEditablePage(entry("live") + entry("pending", { hasDraft: true }));
+		expect(document.getElementById("emdash-tb-status")!.textContent).toBe("Unpublished changes");
+		expect(publishButton().style.display).not.toBe("none");
+	});
+
+	it.each([403, 409, "network"])(
+		"publishes later entries even when the first fails with %s",
+		async (failure) => {
+			vi.spyOn(console, "error").mockImplementation(() => {});
+			const api = holdPublishing();
+			mountEditablePage(entry("blocked", { hasDraft: true }) + entry("mine", { hasDraft: true }));
+			publishButton().click();
+			if (failure === "network") {
+				api.reject(new Error("Disconnected"));
+			} else {
+				api.answer(
+					Response.json({ error: { message: "Cannot publish this entry" } }, { status: failure }),
+				);
+			}
+			await vi.waitFor(() => expect(api.published).toHaveLength(2));
+			expect(publishButton().disabled).toBe(true);
+			api.answer(new Response(null, { status: 200 }));
+			await vi.waitFor(() => expect(publishButton().disabled).toBe(false));
+			expect(document.getElementById("emdash-tb-status")!.textContent).toBe(
+				failure === "network" ? "Publish failed" : "Cannot publish this entry",
+			);
+			expect(api.reload).not.toHaveBeenCalled();
+			publishButton().click();
+			await vi.waitFor(() => expect(api.published).toHaveLength(3));
+			expect(api.published.map((url) => url.split("/").at(-2))).toEqual([
+				"blocked",
+				"mine",
+				"blocked",
+			]);
+		},
+	);
+
+	it("publishes both saved entries, including a save that finishes while Publish waits", async () => {
+		const api = holdPublishing();
+		mountEditablePage(entry("one") + entry("two"));
+		await editInPlace(document.querySelectorAll("h2")[0]!, "Edited one");
+		await vi.waitFor(() => expect(publishButton().style.display).not.toBe("none"));
+		let finishSave!: () => void;
+		const done = new Promise<void>((resolve) => {
+			finishSave = resolve;
+		});
+		document.dispatchEvent(new CustomEvent("emdash:save-pending", { detail: { done } }));
+		publishButton().click();
+		expect(api.published).toEqual([]);
+		document.dispatchEvent(
+			new CustomEvent("emdash:content-changed", { detail: { collection: "posts", id: "two" } }),
+		);
+		finishSave();
+		await vi.waitFor(() => expect(api.published).toHaveLength(1));
+		api.answer(new Response(null, { status: 200 }));
+		await vi.waitFor(() => expect(api.published).toHaveLength(2));
+		expect(api.published.map((url) => url.split("/").at(-2))).toEqual(["one", "two"]);
+	});
+
+	it("publishes both inline-edited entries before reloading", async () => {
+		const api = holdPublishing();
+		mountEditablePage(entry("one") + entry("two"));
+		await editInPlace(document.querySelectorAll("h2")[0]!, "Edited one");
+		await editInPlace(document.querySelectorAll("h2")[1]!, "Edited two");
+		await vi.waitFor(() =>
+			expect(document.getElementById("emdash-tb-save-status")!.textContent).toBe("Saved"),
+		);
+		publishButton().click();
+		await vi.waitFor(() => expect(api.published).toHaveLength(1));
+		api.answer(new Response(null, { status: 200 }));
+		await vi.waitFor(() => expect(api.published).toHaveLength(2));
+		expect(api.reload).not.toHaveBeenCalled();
+		api.answer(new Response(null, { status: 200 }));
+		await vi.waitFor(() => expect(api.reload).toHaveBeenCalledTimes(1));
+		expect(api.published.map((url) => url.split("/").at(-2))).toEqual(["one", "two"]);
+	});
+
+	it("does not lose a new save of an entry while its publish request is in flight", async () => {
+		const api = holdPublishing();
+		mountEditablePage(entry("one", { hasDraft: true }));
+		publishButton().click();
+		document.dispatchEvent(
+			new CustomEvent("emdash:content-changed", { detail: { collection: "posts", id: "one" } }),
+		);
+		api.answer(new Response(null, { status: 200 }));
+		await vi.waitFor(() => expect(api.published).toHaveLength(2));
+		expect(api.reload).not.toHaveBeenCalled();
+		api.answer(new Response(null, { status: 200 }));
+		await vi.waitFor(() => expect(api.reload).toHaveBeenCalledTimes(1));
+	});
+
+	it.each(["http", "network"])(
+		"keeps remaining entries retryable after a partial %s failure",
+		async (failure) => {
+			vi.spyOn(console, "error").mockImplementation(() => {});
+			const api = holdPublishing();
+			mountEditablePage(
+				entry("same", { hasDraft: true }) + entry("same", { hasDraft: true }, "pages"),
+			);
+			publishButton().click();
+			api.answer(new Response(null, { status: 200 }));
+			await vi.waitFor(() => expect(api.published).toHaveLength(2));
+			if (failure === "http") {
+				api.answer(Response.json({ error: { message: "Try again" } }, { status: 500 }));
+			} else {
+				api.reject(new Error("Disconnected"));
+			}
+			await vi.waitFor(() => expect(publishButton().disabled).toBe(false));
+			expect(document.getElementById("emdash-tb-status")!.textContent).toBe(
+				failure === "http" ? "Try again" : "Publish failed",
+			);
+			expect(api.reload).not.toHaveBeenCalled();
+			publishButton().click();
+			await vi.waitFor(() => expect(api.published).toHaveLength(3));
+			expect(api.published).toEqual([
+				"/_emdash/api/visual-editing/content/posts/same/publish",
+				"/_emdash/api/visual-editing/content/pages/same/publish",
+				"/_emdash/api/visual-editing/content/pages/same/publish",
+			]);
+		},
+	);
+});
+
 describe("toolbar inline editing", () => {
 	it("edits text in place while the toolbar pill is hidden", async () => {
 		const fetchMock = stubApi();
@@ -135,7 +448,8 @@ describe("toolbar inline editing", () => {
 		await vi.waitFor(() =>
 			expect(openMock).toHaveBeenCalledWith(
 				"/_emdash/admin/content/posts/post-1?field=excerpt",
-				"emdash-admin",
+				// One window per entry, so this entry's admin tab is reused and no other entry's is replaced.
+				"emdash-admin-posts/post-1",
 			),
 		);
 		expect(excerpt.hasAttribute("data-emdash-editing")).toBe(false);

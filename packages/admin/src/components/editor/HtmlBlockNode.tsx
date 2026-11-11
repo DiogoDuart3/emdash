@@ -12,10 +12,10 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { Eye, FileCss, FileHtml, FileJs } from "@phosphor-icons/react";
-import { Node, mergeAttributes } from "@tiptap/core";
 import type { NodeViewProps } from "@tiptap/react";
 import * as React from "react";
 
+import { HtmlBlockNode } from "../../portable-text/schema.js";
 import type { CodeEditorLanguage } from "./CodeEditor";
 import {
 	CLIPBOARD_TOKEN,
@@ -87,7 +87,7 @@ const PREVIEW_TAB: EmbedBlockTab = { value: "preview", label: PREVIEW_LABEL, Ico
 const isEmpty = (attrs: Record<string, unknown>) =>
 	FIELDS.every((field) => !fieldValue(attrs, field));
 
-function HtmlBlockNodeView({ editor, node, getPos, updateAttributes, selected }: NodeViewProps) {
+function HtmlBlockNodeView({ editor, node, getPos, updateAttributes }: NodeViewProps) {
 	const { t } = useLingui();
 	const editable = editor.isEditable;
 	const isolated = node.attrs.isolated === true;
@@ -175,7 +175,6 @@ function HtmlBlockNodeView({ editor, node, getPos, updateAttributes, selected }:
 	return (
 		<EmbedBlockCard
 			className="html-block"
-			selected={selected}
 			editable={editable}
 			tabs={tabs}
 			activeTab={activeTab}
@@ -183,12 +182,12 @@ function HtmlBlockNodeView({ editor, node, getPos, updateAttributes, selected }:
 			menuLabel={t`HTML block options`}
 			menu={
 				<DropdownMenu.Group>
-					<DropdownMenu.Label>{t`On the site`}</DropdownMenu.Label>
+					<DropdownMenu.Label className="px-2!">{t`On the site`}</DropdownMenu.Label>
 					<DropdownMenu.RadioGroup
 						value={isolated ? "isolated" : "inline"}
 						onValueChange={setIsolated}
 					>
-						<DropdownMenu.RadioItem value="isolated" closeOnClick>
+						<DropdownMenu.RadioItem value="isolated" closeOnClick className="px-2!">
 							<span className="flex flex-col">
 								{t`Isolated frame`}
 								<span className="text-xs text-kumo-subtle">
@@ -196,7 +195,7 @@ function HtmlBlockNodeView({ editor, node, getPos, updateAttributes, selected }:
 								</span>
 							</span>
 						</DropdownMenu.RadioItem>
-						<DropdownMenu.RadioItem value="inline" closeOnClick>
+						<DropdownMenu.RadioItem value="inline" closeOnClick className="px-2!">
 							<span className="flex flex-col">
 								{t`Inline`}
 								<span className="text-xs text-kumo-subtle">
@@ -244,68 +243,20 @@ function HtmlBlockNodeView({ editor, node, getPos, updateAttributes, selected }:
 	);
 }
 
-/**
- * TipTap extension: first-class HTML block.
- *
- * A top-level atom. The editor's global drag handle moves it.
- */
-export const HtmlBlockExtension = Node.create({
-	name: "htmlBlock",
-	group: "topBlock",
-	atom: true,
-	draggable: false,
-	selectable: true,
-
+/** TipTap extension: first-class HTML block. */
+export const HtmlBlockExtension = HtmlBlockNode.extend({
 	addAttributes() {
+		const parent = this.parent?.() ?? {};
 		return {
-			html: {
-				default: "",
-				// Store the raw markup in a semantic `data-html-content` attribute
-				// rather than leaking it as a bare `html="..."` attribute on every
-				// DOM/clipboard serialization (drag, copy, paste).
-				parseHTML: (element) => element.getAttribute("data-html-content") ?? "",
-				renderHTML: (attributes) => {
-					const html = typeof attributes.html === "string" ? attributes.html : "";
-					if (!html) return {};
-					return { "data-html-content": html };
-				},
-			},
-			css: {
-				default: "",
-				parseHTML: (element) => element.getAttribute("data-html-css") ?? "",
-				renderHTML: (attributes) =>
-					typeof attributes.css === "string" && attributes.css
-						? { "data-html-css": attributes.css }
-						: {},
-			},
-			js: {
-				default: "",
-				parseHTML: (element) => element.getAttribute("data-html-js") ?? "",
-				renderHTML: (attributes) =>
-					typeof attributes.js === "string" && attributes.js
-						? { "data-html-js": attributes.js }
-						: {},
-			},
+			...parent,
 			isolated: {
-				default: false,
+				...parent.isolated,
 				// Blocks pasted from other pages render inline, so their scripts don't run on the site.
 				parseHTML: (element) => element.getAttribute("data-html-isolated") === CLIPBOARD_TOKEN,
 				renderHTML: (attributes) =>
 					attributes.isolated === true ? { "data-html-isolated": CLIPBOARD_TOKEN } : {},
 			},
 		};
-	},
-
-	parseHTML() {
-		return [
-			{
-				tag: "div[data-html-block]",
-			},
-		];
-	},
-
-	renderHTML({ HTMLAttributes }) {
-		return ["div", mergeAttributes(HTMLAttributes, { "data-html-block": "" })];
 	},
 
 	addNodeView() {

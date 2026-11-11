@@ -2,13 +2,14 @@
  * Entry edit lock
  *
  * GET    /_emdash/api/content/{collection}/{id}/lock - Read the current holder
- * POST   /_emdash/api/content/{collection}/{id}/lock - Take or refresh the lock
+ * POST   /_emdash/api/content/{collection}/{id}/lock - Take or refresh the lock, or, while a
+ *        co-editing room is open, delete every lock on the entry
  * DELETE /_emdash/api/content/{collection}/{id}/lock - Release the caller's lock
  */
 
 import type { APIRoute } from "astro";
 
-import { requireOwnerPerm } from "#api/authorize.js";
+import { requireEntryEditPerm } from "#api/authorize.js";
 import { apiError, mapErrorStatus, unwrapResult } from "#api/error.js";
 import {
 	handleEntryLockAcquire,
@@ -60,7 +61,7 @@ async function resolveEntry(
 				(existingData.item as Record<string, unknown>)
 			: existingData;
 	const authorId = typeof existingItem?.authorId === "string" ? existingItem.authorId : "";
-	const denied = requireOwnerPerm(user, authorId, "content:edit_own", "content:edit_any");
+	const denied = requireEntryEditPerm(user, { authorId, status: existingItem?.status });
 	if (denied) return denied;
 
 	return {
@@ -81,7 +82,9 @@ export const GET: APIRoute = async ({ params, locals, url }) => {
 	if (resolved instanceof Response) return resolved;
 
 	return unwrapResult(
-		await handleEntryLockRead(locals.emdash.db, collection, resolved.resolvedId, resolved.userId),
+		await handleEntryLockRead(locals.emdash.db, collection, resolved.resolvedId, resolved.userId, {
+			rooms: locals.emdash.rooms,
+		}),
 	);
 };
 
@@ -105,7 +108,7 @@ export const POST: APIRoute = async ({ params, request, locals, url }) => {
 			collection,
 			resolved.resolvedId,
 			resolved.userId,
-			{ takeover: body?.takeover, token: body?.token },
+			{ takeover: body?.takeover, token: body?.token, rooms: locals.emdash.rooms },
 		),
 	);
 };

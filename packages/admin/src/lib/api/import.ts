@@ -60,9 +60,12 @@ export interface AttachmentInfo {
 
 /** Navigation menu from WordPress */
 export interface NavMenu {
+	/** Menu slug */
 	name: string;
-	slug: string;
-	count: number;
+	/** The menu's name in WordPress */
+	label: string;
+	/** Number of items in the menu */
+	itemCount: number;
 }
 
 /** Custom taxonomy from WordPress */
@@ -149,7 +152,7 @@ export interface ImportConfig {
 	skipExisting: boolean;
 	/** Author mappings (WP author login -> EmDash user ID) */
 	authorMappings?: Record<string, string | null>;
-	/** Import navigation menus (plugin import; default true) */
+	/** Import navigation menus (default true) */
 	importMenus?: boolean;
 	/** Take over site title & tagline (plugin import; default true) */
 	importSiteTitle?: boolean;
@@ -165,13 +168,15 @@ export interface ImportResult {
 	skipped: number;
 	errors: Array<{ title: string; error: string }>;
 	byCollection: Record<string, number>;
+	/** Entries imported as drafts because they had a password in WordPress (WXR import) */
+	passwordProtected?: Array<{ id: string; collection: string; title: string }>;
 	/** Number of taxonomy term assignments written (plugin import) */
 	taxonomyAssignments?: number;
 	/** Source taxonomies skipped because no matching EmDash taxonomy def exists */
 	missingTaxonomies?: string[];
 	/** Custom taxonomy defs auto-created during the import (plugin import) */
 	taxonomiesCreated?: string[];
-	/** Navigation menu import summary (plugin import) */
+	/** Navigation menu import summary */
 	menus?: { created: number; items: number };
 	/** Comment import summary (plugin import) */
 	comments?: { imported: number; skipped: number };
@@ -252,7 +257,10 @@ async function executeWpPluginImportChunk(
 			commentRoots: state.commentRoots,
 		}),
 	});
-	return parseApiResponse<WpImportChunkResponse>(response, "Failed to import from WordPress");
+	return parseApiResponse<WpImportChunkResponse>(
+		response,
+		i18n._(msg`Failed to import from WordPress`),
+	);
 }
 
 /** Merge a chunk's partial result into the running aggregate. */
@@ -262,6 +270,9 @@ function mergeImportResults(into: ImportResult, chunk: ImportResult): void {
 	into.errors.push(...chunk.errors);
 	for (const [collection, count] of Object.entries(chunk.byCollection)) {
 		into.byCollection[collection] = (into.byCollection[collection] || 0) + count;
+	}
+	if (chunk.passwordProtected?.length) {
+		into.passwordProtected = [...(into.passwordProtected ?? []), ...chunk.passwordProtected];
 	}
 	if (chunk.taxonomyAssignments) {
 		into.taxonomyAssignments = (into.taxonomyAssignments ?? 0) + chunk.taxonomyAssignments;
@@ -372,7 +383,7 @@ export async function analyzeWxr(file: File): Promise<WxrAnalysis> {
 		method: "POST",
 		body: formData,
 	});
-	return parseApiResponse<WxrAnalysis>(response, "Failed to analyze file");
+	return parseApiResponse<WxrAnalysis>(response, i18n._(msg`Failed to analyze file`));
 }
 
 /**
@@ -384,7 +395,7 @@ export async function prepareWxrImport(request: PrepareRequest): Promise<Prepare
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify(request),
 	});
-	return parseApiResponse<PrepareResult>(response, "Failed to prepare import");
+	return parseApiResponse<PrepareResult>(response, i18n._(msg`Failed to prepare import`));
 }
 
 /**
@@ -426,7 +437,7 @@ async function executeWxrImportChunk(
 		method: "POST",
 		body: formData,
 	});
-	return parseApiResponse<WxrImportChunkResponse>(response, "Failed to import");
+	return parseApiResponse<WxrImportChunkResponse>(response, i18n._(msg`Failed to import`));
 }
 
 export async function executeWxrImport(
@@ -533,7 +544,7 @@ export async function importWxrMedia(
 	// If no progress callback, just parse as JSON (non-streaming mode)
 	// Note: streaming NDJSON responses are excluded from the { success, data } envelope
 	if (!onProgress) {
-		return parseApiResponse<MediaImportResult>(response, "Failed to import media");
+		return parseApiResponse<MediaImportResult>(response, i18n._(msg`Failed to import media`));
 	}
 
 	// Streaming mode: read NDJSON line by line
@@ -691,6 +702,8 @@ export interface ProbeResult {
 	isWordPress: boolean;
 	bestMatch: SourceProbeResult | null;
 	allMatches: SourceProbeResult[];
+	/** No source matched because a bot-protection challenge blocked the probe */
+	challenged?: boolean;
 }
 
 /**
@@ -702,7 +715,10 @@ export async function probeImportUrl(url: string): Promise<ProbeResult> {
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ url }),
 	});
-	const data = await parseApiResponse<{ result: ProbeResult }>(response, "Failed to probe URL");
+	const data = await parseApiResponse<{ result: ProbeResult }>(
+		response,
+		i18n._(msg`Failed to probe URL`),
+	);
 	return data.result;
 }
 
@@ -718,7 +734,7 @@ export async function rewriteContentUrls(
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ urlMap, collections }),
 	});
-	return parseApiResponse<RewriteUrlsResult>(response, "Failed to rewrite URLs");
+	return parseApiResponse<RewriteUrlsResult>(response, i18n._(msg`Failed to rewrite URLs`));
 }
 
 // =============================================================================
@@ -757,7 +773,7 @@ export async function analyzeWpPluginSite(url: string, token: string): Promise<W
 	});
 	const data = await parseApiResponse<{ analysis: WpPluginAnalysis }>(
 		response,
-		"Failed to analyze WordPress site",
+		i18n._(msg`Failed to analyze WordPress site`),
 	);
 	return data.analysis;
 }
